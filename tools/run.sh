@@ -20,4 +20,4 @@ set -- ${CPU:+--cpu=$CPU} ${FPU:+--uae_fpu_model=$FPU}
 exec "$EMU" --amiga_model=A1200 --kickstart_file="$ROM" "$@" \
     --hard_drive_0="$WB" --hard_drive_0_read_only=1 \
     --hard_drive_1=build/hd --hard_drive_1_label=AMIGAMAND \
-    --automatic_input_grab=0 --fullscreen=0 --window_width=960 --window_height=720 --floppy_drive_volume=0
+    --joystick_port_1=none --automatic_input_grab=0 --fullscreen=0 --window_width=960 --window_height=720 --floppy_drive_volume=0
