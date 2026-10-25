@@ -1,5 +1,5 @@
-CC     ?= m68k-amigaos-gcc
-CFLAGS  = -m68020 -noixemul -O2 -Wall
+CC     ?= vc
+CFLAGS  = +aos68k -cpu=68020 -O2 -c99
 
 all: amigamand amigamand-ffp
 

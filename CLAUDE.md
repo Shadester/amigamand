@@ -18,7 +18,7 @@ Mandelbrot generator for AmigaOS 3.1 (Kickstart 40). Target: classic 68k Amiga, 
 
 ## Toolchain
 
-bebbo `m68k-amigaos-gcc` (amiga-gcc), target `-m68020 -noixemul`. Needs NDK 3.1 headers.
+vbcc (`vc +aos68k -cpu=68020`) with vasm and vlink. Needs the vbcc `aos68k` target config and NDK 3.1 headers. Not bebbo gcc.
 
 ## Commands
 
