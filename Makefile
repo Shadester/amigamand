@@ -1,4 +1,9 @@
-CC     ?= vc
+VBCC   ?= $(CURDIR)/toolchain/vbcc
+export VBCC
+# vc spawns vbccm68k/vasm/vlink via PATH
+export PATH := $(VBCC)/bin:$(PATH)
+
+CC      = $(VBCC)/bin/vc
 CFLAGS  = +aos68k -cpu=68020 -O2 -c99
 
 all: amigamand amigamand-ffp

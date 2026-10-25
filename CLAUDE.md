@@ -18,7 +18,11 @@ Mandelbrot generator for AmigaOS 3.1 (Kickstart 40). Target: classic 68k Amiga, 
 
 ## Toolchain
 
-vbcc (`vc +aos68k -cpu=68020`) with vasm and vlink. Needs the vbcc `aos68k` target config and NDK 3.1 headers. Not bebbo gcc.
+vbcc (`vc +aos68k -cpu=68020`) with vasm and vlink. Not bebbo gcc.
+Installed in `toolchain/vbcc` inside the repo (gitignored; nothing outside the repo; override with `VBCC=`); the Makefile sets `VBCC` and `PATH` and calls `$(VBCC)/bin/vc`, so plain `make` works from any shell.
+Built from source on macOS arm64: vbcc, vasm (`vasmm68k_mot`), vlink (unofficial GitHub mirror Leffmann/vlink, official URL was dead). Unix config from `vbcc_unix_config.tar.gz` (the target package's own config uses Amiga assigns, do not use it).
+Headers: NDK 3.2 `Include_H` (no 3.1/3.9 on Aminet). Do not call 3.2-only APIs.
+Known issue: `MUL()` in fixed-point build compiles to `__mulint64_020` + `__rshsint64` calls, not one `muls.l`. Slow; replace with inline asm.
 
 ## Commands
 
