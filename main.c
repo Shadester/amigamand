@@ -1,4 +1,4 @@
-/* amigamand: Mandelbrot for AmigaOS 3.1. Build with -DUSE_FFP for the FFP variant. */
+/* amigamand: Mandelbrot for AmigaOS 3.1. Build with -DUSE_FPU -fpu=68881 for the FPU variant. */
 #include <exec/types.h>
 #include <intuition/intuition.h>
 #include <graphics/modeid.h>
@@ -7,9 +7,8 @@
 #include <proto/intuition.h>
 #include <proto/graphics.h>
 #include <proto/gadtools.h>
-#ifdef USE_FFP
-#include <proto/mathffp.h>
-struct Library *MathBase;
+#ifdef USE_FPU
+#include <exec/execbase.h>
 #endif
 
 #define DEPTH 8
@@ -43,35 +42,28 @@ static struct NewMenu newmenu[] = {
 	{ NM_END, NULL, NULL, 0, 0, NULL },
 };
 
-#ifdef USE_FFP
-/* FFP argument order is reversed: SPSub(a,b) = b-a, SPDiv(a,b) = b/a. These give a-b and a/b. SPCmp(a,b) is +1 if a > b. */
-#define FSUB(a, b) SPSub(b, a)
-#define FDIV(a, b) SPDiv(b, a)
-
-static FLOAT x0, y0, dx, dy, two, four;
+#ifdef USE_FPU
+static double x0, y0, dx, dy;
 
 static void view_init(LONG w, LONG h)
 {
-	x0 = FDIV(SPFlt(-5), SPFlt(2));
-	y0 = FDIV(SPFlt(-7), SPFlt(5));
-	dx = FDIV(SPFlt(7), SPFlt(2 * w));
-	dy = FDIV(SPFlt(14), SPFlt(5 * h));
-	two = SPFlt(2);
-	four = SPFlt(4);
+	x0 = -2.5;
+	y0 = -1.4;
+	dx = 3.5 / w;
+	dy = 2.8 / h;
 }
 
 static LONG mandel(LONG px, LONG py)
 {
-	FLOAT cr = SPAdd(x0, SPMul(SPFlt(px), dx));
-	FLOAT ci = SPAdd(y0, SPMul(SPFlt(py), dy));
-	FLOAT zr = 0, zi = 0, zr2 = 0, zi2 = 0;
+	double cr = x0 + px * dx, ci = y0 + py * dy;
+	double zr = 0, zi = 0, zr2 = 0, zi2 = 0;
 	LONG i = 0;
 
-	while (i < MAXIT && SPCmp(four, SPAdd(zr2, zi2)) >= 0) { /* sum <= 4 */
-		zi = SPAdd(ci, SPMul(two, SPMul(zr, zi)));
-		zr = SPAdd(cr, FSUB(zr2, zi2));
-		zr2 = SPMul(zr, zr);
-		zi2 = SPMul(zi, zi);
+	while (i < MAXIT && zr2 + zi2 <= 4.0) {
+		zi = 2 * zr * zi + ci;
+		zr = zr2 - zi2 + cr;
+		zr2 = zr * zr;
+		zi2 = zi * zi;
 		i++;
 	}
 	return i;
@@ -185,16 +177,13 @@ int main(void)
 	struct IntuiMessage *msg;
 	LONG mode = DEFMODE, x, y = 0, it, quit = 0, rc = 20;
 
+#ifdef USE_FPU
+	if (!(SysBase->AttnFlags & (AFF_68881 | AFF_68882 | AFF_FPU40)))
+		return 26; /* an FPU instruction without an FPU is a guru */
+#endif
 	IntuitionBase = (struct IntuitionBase *)OpenLibrary("intuition.library", 39);
 	GfxBase = (struct GfxBase *)OpenLibrary("graphics.library", 39);
 	GadToolsBase = OpenLibrary("gadtools.library", 39);
-#ifdef USE_FFP
-	MathBase = OpenLibrary("mathffp.library", 33);
-	if (!MathBase) {
-		rc = 21;
-		goto out;
-	}
-#endif
 	if (!IntuitionBase || !GfxBase || !GadToolsBase) {
 		rc = 22;
 		goto out;
@@ -248,10 +237,6 @@ int main(void)
 	rc = 0;
 out:
 	close_display();
-#ifdef USE_FFP
-	if (MathBase)
-		CloseLibrary(MathBase);
-#endif
 	if (GadToolsBase)
 		CloseLibrary(GadToolsBase);
 	if (GfxBase)
