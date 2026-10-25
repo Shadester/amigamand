@@ -121,7 +121,8 @@ static UBYTE lut[256];       /* iteration count -> pen */
 static UBYTE rgb[768], cur_rgb[768];
 static WORD pal_idx, cyc_off;
 static BOOL cycle;
-static BOOL rendering, dragging, quitting, sym, have_last, menu_open;
+static BOOL rendering, dragging, quitting, have_last, menu_open;
+static WORD sym; /* view_symmetric(): 0 none, 1 mirrored about the real axis, 2 turned half way round */
 static WORD pass, rk, hh, rows_done;
 /* Mariani-Silver: tiles, each a stack of rectangles whose border is tested for one colour */
 #define TILE 32
@@ -209,8 +210,8 @@ static void start_render(void)
 	status[0] = 0;
 	t_start = ticks();
 	build_lut();
-	/* the fill needs a connected set: a Julia set is one when its constant is in the Mandelbrot set */
-	use_ms = fast && (!V.julia || view_c_inside());
+	/* the fill pays off for the Mandelbrot set only; a Julia set is half the work by its symmetry instead */
+	use_ms = fast && !V.julia;
 	if (use_ms) {
 		memset(img, UNSET, (LONG)V.w * V.h);
 		preview_pending = TRUE;
@@ -293,8 +294,15 @@ static void row_step(void)
 		WORD my = V.h - y - rep;
 		UBYTE *m = img + (LONG)my * w;
 
-		for (r = 0; r < rep; r++)
-			CopyMem(dst, m + (LONG)r * w, w);
+		for (r = 0; r < rep; r++) {
+			UBYTE *q = m + (LONG)r * w;
+
+			if (sym == 1)
+				CopyMem(dst, q, w);
+			else
+				for (x = 0; x < w; x++)
+					q[x] = dst[w - 1 - x];
+		}
 		put_chunky(0, my, w, rep, m);
 	}
 	if ((++rows_done & 15) == 0)

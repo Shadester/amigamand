@@ -22,6 +22,10 @@ LONG fxmul(__reg("d0") LONG, __reg("d1") LONG) =
 	"\tand.l\t#255,d0\n"
 	"\tor.l\td1,d0\n";
 #define NMUL(a, b) fxmul(a, b)
+/* The high long of a 32x32 muls.l: with Q4.28 operands the square comes out as Q8.24 with no shifting. */
+LONG mulhi(__reg("d0") LONG, __reg("d1") LONG) =
+	"\tmuls.l\td1,d1:d0\n"
+	"\tmove.l\td1,d0\n";
 #define NI(i) ((LONG)(i) << FB)
 #define NFRAC(a, b) ((LONG)(a) * ONE / (b)) /* |a| <= 127 */
 #define NQ(a) ((a) >> 2)
@@ -133,7 +137,9 @@ void view_mandel(void)
 
 int view_symmetric(void)
 {
-	return !V.julia && V.cy == 0;
+	if (V.julia) /* z and -z give the same orbit: the picture is the same turned half way round */
+		return V.cx == 0 && V.cy == 0 ? 2 : 0;
+	return V.cy == 0 ? 1 : 0;
 }
 
 static WORD iter(num pr, num pi)
@@ -155,6 +161,7 @@ static WORD iter(num pr, num pi)
 		cr = pr, ci = pi;
 		zr = zi = 0;
 	}
+#ifdef USE_FPU
 	zr2 = NMUL(zr, zr);
 	zi2 = NMUL(zi, zi);
 	while (i < maxit && zr2 + zi2 <= NI(4)) {
@@ -164,22 +171,25 @@ static WORD iter(num pr, num pi)
 		zi2 = NMUL(zi, zi);
 		i++;
 	}
+#else
+	/* z and c in Q4.28 (|z| <= 6.8 before the test, c <= 6), squares in Q8.24 */
+	cr <<= 4, ci <<= 4, zr <<= 4, zi <<= 4;
+	zr2 = mulhi(zr, zr);
+	zi2 = mulhi(zi, zi);
+	while (i < maxit && zr2 + zi2 <= NI(4)) {
+		zi = (mulhi(zr, zi) << 5) + ci; /* 2*zr*zi: |zr|, |zi| <= 2 here */
+		zr = ((zr2 - zi2) << 4) + cr;
+		zr2 = mulhi(zr, zr);
+		zi2 = mulhi(zi, zi);
+		i++;
+	}
+#endif
 	return i;
 }
 
 WORD view_pixel(WORD x, WORD y)
 {
 	return iter(V.x0 + x * V.dx, V.y0 + y * V.dy);
-}
-
-int view_c_inside(void)
-{
-	WORD julia = V.julia, r;
-
-	V.julia = 0;
-	r = iter(V.jr, V.ji);
-	V.julia = julia;
-	return r >= V.maxit;
 }
 
 void view_row(WORD y, UBYTE *dst)

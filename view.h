@@ -31,10 +31,9 @@ void view_pan(WORD fx, WORD fy);                  /* in quarters of the picture 
 void view_point(WORD px, WORD py, num *re, num *im);
 void view_julia(num re, num im);                  /* switch to the Julia set of re+im*i */
 void view_mandel(void);
-int view_symmetric(void);                         /* rows y and h-1-y are equal */
+int view_symmetric(void);                         /* 0 none, 1 rows y and h-1-y are equal, 2 turned half way round */
 void view_row(WORD y, UBYTE *dst);                /* iteration counts, maxit = inside the set */
 WORD view_pixel(WORD x, WORD y);                  /* the iteration count of one pixel */
-int view_c_inside(void);                          /* the Julia constant is in the Mandelbrot set (so the Julia set is connected) */
 
 const char *num_parse(const char *s, num *out);   /* returns the end, or NULL if no number */
 void num_fmt(num v, char *buf);
