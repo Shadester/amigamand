@@ -24,6 +24,7 @@
 #include "palette.h"
 #include "ilbm.h"
 #include "rexx.h"
+#include "c2p.h"
 
 struct IntuitionBase *IntuitionBase;
 struct GfxBase *GfxBase;
@@ -58,7 +59,7 @@ static void init_modes(void)
 
 enum {
 	ACT_REDRAW = 1, ACT_ABORT, ACT_SAVE, ACT_QUIT, ACT_ZIN, ACT_ZOUT, ACT_RESET, ACT_MANDEL, ACT_JULIA, ACT_OTHER,
-	ACT_CYCLE,
+	ACT_CYCLE, ACT_FAST,
 	ACT_MODE = 20,  /* + 0..2 */
 	ACT_PAL = 30,   /* + 0..NPAL-1 */
 	ACT_ITER = 40,  /* + 0..2 */
@@ -95,6 +96,7 @@ static struct NewMenu newmenu[] = {
 	RADIO("64 iterations", ACT_ITER + 0, 6),
 	RADIO("128 iterations", ACT_ITER + 1, 5),
 	RADIO("255 iterations", ACT_ITER + 2, 3),
+	{ NM_ITEM, "Fast fill", "F", CHECKIT | MENUTOGGLE, 0, (APTR)ACT_FAST },
 	{ NM_END, NULL, NULL, 0, 0, NULL },
 };
 
@@ -119,14 +121,24 @@ static UBYTE lut[256];       /* iteration count -> pen */
 static UBYTE rgb[768], cur_rgb[768];
 static WORD pal_idx, cyc_off;
 static BOOL cycle;
-static BOOL rendering, dragging, quitting, sym, have_last;
+static BOOL rendering, dragging, quitting, sym, have_last, menu_open;
 static WORD pass, rk, hh, rows_done;
+/* Mariani-Silver: tiles, each a stack of rectangles whose border is tested for one colour */
+#define TILE 32
+#define UNSET 255 /* a pen that is never used, marks a pixel not computed yet */
+struct rect {
+	WORD x0, y0, x1, y1;
+};
+static struct rect stk[48];
+static WORD sp, tile_x, tile_y, tx0, ty0, tx1, ty1, tiles_done, tiles_total;
+static BOOL fast = TRUE, use_ms, preview_pending, tile_open, tile_solid;
+static UBYTE solid_pen;
 static LONG t_start, t_elapsed, exit_rc;
 static num last_re, last_im;
 static char status[48];
 
 static struct {
-	WORD mode, iter, julia, quit;
+	WORD mode, iter, julia, quit, exact;
 	char cx[40], cy[40], span[40], jr[40], ji[40], pal[24], save[100];
 } opt = { -1, 0 };
 
@@ -167,7 +179,7 @@ static void show_title(void)
 	p += strlen(p);
 	*p++ = ' ', p = put_uint(p, V.maxit), p = cat(p, " it  ");
 	if (rendering) {
-		p = put_uint(p, hh ? rows_done * 100 / hh : 0);
+		p = put_uint(p, use_ms ? (tiles_total ? tiles_done * 100 / tiles_total : 0) : (hh ? rows_done * 100 / hh : 0));
 		p = cat(p, "%  ");
 		p = put_tenths(p, (ticks() - t_start) / 5);
 	} else
@@ -197,6 +209,15 @@ static void start_render(void)
 	status[0] = 0;
 	t_start = ticks();
 	build_lut();
+	/* the fill needs a connected set: a Julia set is one when its constant is in the Mandelbrot set */
+	use_ms = fast && (!V.julia || view_c_inside());
+	if (use_ms) {
+		memset(img, UNSET, (LONG)V.w * V.h);
+		preview_pending = TRUE;
+		tile_open = FALSE;
+		tile_x = tile_y = tiles_done = 0;
+		tiles_total = ((V.w + TILE - 1) / TILE) * ((hh + TILE - 1) / TILE);
+	}
 	show_title();
 }
 
@@ -229,6 +250,12 @@ static void render_done(void)
 	t_elapsed = ticks() - t_start;
 	show_title();
 	rexx_wake();
+	if (opt.quit) { /* batch run: report the time on stdout, so a script can read it */
+		LONG a[1];
+
+		a[0] = t_elapsed;
+		VPrintf("render %ld ticks\n", a);
+	}
 	if (opt.save[0]) {
 		do_save(opt.save);
 		opt.save[0] = 0;
@@ -237,7 +264,16 @@ static void render_done(void)
 		quitting = TRUE;
 }
 
-static void render_step(void)
+/* A block of pens to the screen: our own conversion when it is 8-pixel aligned, graphics.library otherwise. */
+static void put_chunky(WORD x, WORD y, WORD w, WORD h, const UBYTE *src)
+{
+	if (((x | w) & 7) == 0)
+		c2p_rect(src, V.w, scr->RastPort.BitMap, x, y, w, h);
+	else
+		WriteChunkyPixels(win->RPort, x, y, x + w - 1, y + h - 1, (UBYTE *)src, V.w);
+}
+
+static void row_step(void)
 {
 	WORD y, rep, r, x, w = V.w;
 	UBYTE *dst;
@@ -252,17 +288,143 @@ static void render_step(void)
 		dst[x] = lut[rowbuf[x]];
 	for (r = 1; r < rep; r++)
 		CopyMem(dst, dst + (LONG)r * w, w);
-	WriteChunkyPixels(win->RPort, 0, y, w - 1, y + rep - 1, dst, w);
+	put_chunky(0, y, w, rep, dst);
 	if (sym) { /* the same rows again, mirrored about the real axis */
 		WORD my = V.h - y - rep;
 		UBYTE *m = img + (LONG)my * w;
 
 		for (r = 0; r < rep; r++)
 			CopyMem(dst, m + (LONG)r * w, w);
-		WriteChunkyPixels(win->RPort, 0, my, w - 1, my + rep - 1, m, w);
+		put_chunky(0, my, w, rep, m);
 	}
 	if ((++rows_done & 15) == 0)
 		show_title();
+}
+
+/* the pen of a pixel, computed the first time it is asked for */
+static UBYTE pix(WORD x, WORD y)
+{
+	UBYTE *p = img + (LONG)y * V.w + x;
+
+	if (*p == UNSET)
+		*p = lut[view_pixel(x, y)];
+	return *p;
+}
+
+/* One coarse sample for each 16x16 block, drawn at once: something to look at while the tiles are computed. */
+static void preview(void)
+{
+	struct RastPort *rp = win->RPort;
+	WORD bx, by, x1, y1;
+
+	for (by = 0; by < hh; by += 16)
+		for (bx = 0; bx < V.w; bx += 16) {
+			x1 = bx + 15 < V.w ? bx + 15 : V.w - 1;
+			y1 = by + 15 < hh ? by + 15 : hh - 1;
+			SetAPen(rp, pix((bx + x1) / 2, (by + y1) / 2));
+			RectFill(rp, bx, by, x1, y1);
+			if (sym)
+				RectFill(rp, bx, V.h - 1 - y1, x1, V.h - 1 - by);
+		}
+}
+
+static void push(WORD x0, WORD y0, WORD x1, WORD y1)
+{
+	stk[sp].x0 = x0, stk[sp].y0 = y0, stk[sp].x1 = x1, stk[sp].y1 = y1;
+	sp++;
+}
+
+/* One rectangle: if its whole border has one pen so has the inside (the set is connected), else cut it in four. */
+static void ms_rect(WORD x0, WORD y0, WORD x1, WORD y1, BOOL root)
+{
+	WORD x, y, xm, ym;
+	UBYTE p;
+	BOOL same = TRUE;
+
+	if (x1 - x0 < 3 || y1 - y0 < 3) { /* too small to cut: the few pixels left */
+		for (y = y0; y <= y1; y++)
+			for (x = x0; x <= x1; x++)
+				pix(x, y);
+		return;
+	}
+	p = pix(x0, y0);
+	for (x = x0; x <= x1 && same; x++)
+		if (pix(x, y0) != p || pix(x, y1) != p)
+			same = FALSE;
+	for (y = y0 + 1; y < y1 && same; y++)
+		if (pix(x0, y) != p || pix(x1, y) != p)
+			same = FALSE;
+	if (same) {
+		for (y = y0 + 1; y < y1; y++)
+			memset(img + (LONG)y * V.w + x0 + 1, p, x1 - x0 - 1);
+		if (root)
+			tile_solid = TRUE, solid_pen = p;
+		return;
+	}
+	xm = (x0 + x1) / 2, ym = (y0 + y1) / 2;
+	push(x0, y0, xm, ym), push(xm, y0, x1, ym), push(x0, ym, xm, y1), push(xm, ym, x1, y1);
+}
+
+/* A finished tile goes to the screen in one call (or one blitter fill), and its mirror image with it. */
+static void flush_tile(void)
+{
+	struct RastPort *rp = win->RPort;
+	WORD y, w = V.w, tw = tx1 - tx0 + 1, my0 = V.h - 1 - ty1, my1 = V.h - 1 - ty0;
+
+	if (sym)
+		for (y = ty0; y <= ty1; y++)
+			CopyMem(img + (LONG)y * w + tx0, img + (LONG)(V.h - 1 - y) * w + tx0, tw);
+	if (tile_solid) {
+		SetAPen(rp, solid_pen);
+		RectFill(rp, tx0, ty0, tx1, ty1);
+		if (sym)
+			RectFill(rp, tx0, my0, tx1, my1);
+	} else {
+		put_chunky(tx0, ty0, tw, ty1 - ty0 + 1, img + (LONG)ty0 * w + tx0);
+		if (sym)
+			put_chunky(tx0, my0, tw, ty1 - ty0 + 1, img + (LONG)my0 * w + tx0);
+	}
+}
+
+static void ms_step(void)
+{
+	if (preview_pending) {
+		preview();
+		preview_pending = FALSE;
+		return;
+	}
+	if (!tile_open) {
+		if (tile_y >= hh) {
+			render_done();
+			return;
+		}
+		tx0 = tile_x, ty0 = tile_y;
+		tx1 = (tx0 + TILE < V.w ? tx0 + TILE : V.w) - 1;
+		ty1 = (ty0 + TILE < hh ? ty0 + TILE : hh) - 1;
+		tile_x += TILE;
+		if (tile_x >= V.w)
+			tile_x = 0, tile_y += TILE;
+		tile_open = TRUE, tile_solid = FALSE;
+		sp = 0;
+		ms_rect(tx0, ty0, tx1, ty1, TRUE); /* the root test decides if the tile is one colour */
+	} else {
+		sp--;
+		ms_rect(stk[sp].x0, stk[sp].y0, stk[sp].x1, stk[sp].y1, FALSE);
+	}
+	if (sp == 0) {
+		flush_tile();
+		tile_open = FALSE;
+		if ((++tiles_done & 3) == 0)
+			show_title();
+	}
+}
+
+static void render_step(void)
+{
+	if (use_ms)
+		ms_step();
+	else
+		row_step();
 }
 
 static void pal_apply(void)
@@ -308,6 +470,7 @@ static BOOL menu_build(void)
 	for (i = 0; i < 3; i++)
 		mark(ACT_ITER + i, V.maxit == iters[i]);
 	mark(ACT_CYCLE, cycle);
+	mark(ACT_FAST, fast);
 	menu = CreateMenus(newmenu, TAG_END);
 	if (!menu || !LayoutMenus(menu, vi, GTMN_NewLookMenus, TRUE, TAG_END))
 		return FALSE;
@@ -355,7 +518,7 @@ static LONG open_display(WORD m)
 		return 100 + err;
 	win = OpenWindowTags(NULL, WA_CustomScreen, scr, WA_Borderless, TRUE, WA_Backdrop, TRUE, WA_Activate, TRUE,
 			     WA_IDCMP, IDCMP_MENUPICK | IDCMP_VANILLAKEY | IDCMP_RAWKEY | IDCMP_MOUSEBUTTONS |
-			     IDCMP_MOUSEMOVE | IDCMP_INTUITICKS, TAG_END);
+			     IDCMP_MOUSEMOVE | IDCMP_INTUITICKS | IDCMP_MENUVERIFY, TAG_END);
 	if (!win)
 		return 24;
 	vi = GetVisualInfo(scr, TAG_END);
@@ -516,6 +679,7 @@ static void do_menu_cmd(LONG cmd)
 		case ACT_JULIA: act_julia_last(); break;
 		case ACT_OTHER: act_other_mode(); break;
 		case ACT_CYCLE: act_cycle(!cycle); break;
+		case ACT_FAST: fast = !fast; menu_build(); start_render(); break;
 		}
 }
 
@@ -605,6 +769,11 @@ static LONG do_command(const char *line, char *res, LONG n)
 		act_palette(i);
 	} else if (eq(line, "CYCLE"))
 		act_cycle(!eq(a, "OFF"));
+	else if (eq(line, "FAST")) {
+		fast = !eq(a, "OFF");
+		menu_build();
+		start_render();
+	}
 	else if (eq(line, "ITER")) {
 		LONG v = to_long(a);
 
@@ -643,6 +812,8 @@ static LONG do_command(const char *line, char *res, LONG n)
 		p = put_uint(p, V.w), *p++ = 'x', p = put_uint(p, V.h), *p++ = 'x', p = put_uint(p, cdepth), *p++ = ' ';
 		p = cat(p, pal_name(pal_idx)), *p++ = ' ';
 		p = cat(p, rendering ? "RENDERING" : "DONE");
+		*p++ = ' ';
+		p = put_uint(p, t_elapsed); /* ticks of the last finished render, 1/50 s */
 		*p = 0;
 	} else if (eq(line, "QUIT"))
 		quitting = TRUE;
@@ -734,7 +905,11 @@ static void handle(struct IntuiMessage *msg)
 		}
 	ReplyMsg((struct Message *)msg);
 	switch (cls) {
+	case IDCMP_MENUVERIFY: /* a menu is about to open on the screen: stop drawing into it */
+		menu_open = TRUE;
+		break;
 	case IDCMP_MENUPICK:
+		menu_open = FALSE;
 		for (i = 0; i < n && !quitting; i++)
 			do_menu_cmd(picks[i]);
 		break;
@@ -785,8 +960,8 @@ static void setopt(char *dst, const char *src, WORD n)
 
 static void cli_opts(void)
 {
-	LONG a[11] = { 0 };
-	struct RDArgs *rda = ReadArgs("MODE/K/N,CX/K,CY/K,SPAN/K,ITER/K/N,PALETTE/K,JULIA/S,JR/K,JI/K,SAVE/K,QUIT/S", a, NULL);
+	LONG a[12] = { 0 };
+	struct RDArgs *rda = ReadArgs("MODE/K/N,CX/K,CY/K,SPAN/K,ITER/K/N,PALETTE/K,JULIA/S,JR/K,JI/K,SAVE/K,QUIT/S,EXACT/S", a, NULL);
 
 	if (!rda) {
 		PrintFault(IoErr(), "amigamand");
@@ -805,6 +980,7 @@ static void cli_opts(void)
 	setopt(opt.jr, (char *)a[7], sizeof opt.jr), setopt(opt.ji, (char *)a[8], sizeof opt.ji);
 	setopt(opt.save, (char *)a[9], sizeof opt.save);
 	opt.quit = a[10] != 0;
+	opt.exact = a[11] != 0;
 	FreeArgs(rda);
 }
 
@@ -836,6 +1012,7 @@ static void wb_opts(struct WBStartup *wbs)
 	setopt(opt.save, (char *)FindToolType((UBYTE **)tt, "SAVE"), sizeof opt.save);
 	opt.julia = FindToolType((UBYTE **)tt, "JULIA") != NULL;
 	opt.quit = FindToolType((UBYTE **)tt, "QUIT") != NULL;
+	opt.exact = FindToolType((UBYTE **)tt, "EXACT") != NULL;
 	FreeDiskObject(dob);
 }
 
@@ -898,6 +1075,8 @@ int main(int argc, char **argv)
 					pal_idx = i;
 	}
 	SetChipRev(SETCHIPREV_BEST); /* enable AGA modes if the machine has them */
+	if (opt.exact)
+		fast = FALSE;
 	rexx_open();
 	rc = open_display(mode);
 	if (rc) {
@@ -911,7 +1090,7 @@ int main(int argc, char **argv)
 		ULONG wsig = 1UL << win->UserPort->mp_SigBit, rsig = rexx_sigmask(), got;
 		struct IntuiMessage *msg;
 
-		if (rendering && !dragging) {
+		if (rendering && !dragging && !menu_open) {
 			render_step();
 			got = SetSignal(0, 0) & (wsig | rsig | SIGBREAKF_CTRL_C);
 		} else

@@ -167,6 +167,21 @@ static WORD iter(num pr, num pi)
 	return i;
 }
 
+WORD view_pixel(WORD x, WORD y)
+{
+	return iter(V.x0 + x * V.dx, V.y0 + y * V.dy);
+}
+
+int view_c_inside(void)
+{
+	WORD julia = V.julia, r;
+
+	V.julia = 0;
+	r = iter(V.jr, V.ji);
+	V.julia = julia;
+	return r >= V.maxit;
+}
+
 void view_row(WORD y, UBYTE *dst)
 {
 	num ci = V.y0 + y * V.dy, cr = V.x0;

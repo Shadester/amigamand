@@ -5,7 +5,7 @@ export PATH := $(VBCC)/bin:$(PATH)
 
 CC      = $(VBCC)/bin/vc
 CFLAGS  = +aos68k -cpu=68020 -O2 -c99
-SRC     = main.c view.c palette.c ilbm.c rexx.c
+SRC     = main.c view.c palette.c ilbm.c rexx.c c2p.c
 HDR     = $(wildcard *.h)
 
 all: amigamand amigamand-fpu

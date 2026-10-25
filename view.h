@@ -33,6 +33,8 @@ void view_julia(num re, num im);                  /* switch to the Julia set of 
 void view_mandel(void);
 int view_symmetric(void);                         /* rows y and h-1-y are equal */
 void view_row(WORD y, UBYTE *dst);                /* iteration counts, maxit = inside the set */
+WORD view_pixel(WORD x, WORD y);                  /* the iteration count of one pixel */
+int view_c_inside(void);                          /* the Julia constant is in the Mandelbrot set (so the Julia set is connected) */
 
 const char *num_parse(const char *s, num *out);   /* returns the end, or NULL if no number */
 void num_fmt(num v, char *buf);
