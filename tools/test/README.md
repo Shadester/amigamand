@@ -21,6 +21,7 @@ to the emulator process. Takes about ten minutes; each test boots a fresh emulat
 | `save_requester` | the ASL file requester opens, Return saves, the file is the picture |
 | `other_mode_requester` | the ASL screen mode requester opens and is readable |
 | `mouse_handlers` | a drag and a click (test builds `amigamand-tm1`, `-tm2` make the gesture through the real handlers) |
+| `arexx` | the real ARexx (RexxMast, RX) runs a script: commands, `QUERY`'s result string, `WAIT`, return code 10 for bad input |
 | `icon` | `icon.library` loads `amigamand.info` |
 | `workbench_tooltypes` | a start from Workbench (test build `amigamand-tw`) takes its options from the tool types |
 

@@ -72,7 +72,7 @@ they were built on a Mac. Then:
     tools/test/test.sh
 
 boots the programs in FS-UAE and checks the pictures pixel for pixel, the keys, the menu shortcuts, colour cycling, the
-requesters, the ARexx port, the icon and the tool types. See `tools/test/README.md`.
+requesters, the real ARexx port, the icon and the tool types. See `tools/test/README.md`.
 
 ## How fast
 
@@ -81,7 +81,7 @@ Ticks of 1/50 s for one picture on an emulated stock A1200 (68020, chip RAM only
 | picture | ticks | seconds |
 |---|---|---|
 | the whole set, hires | 680 | 14 |
-| the spiral at span 0.02, lores, 255 iterations | 4074 | 81 |
+| the spiral at span 0.02, lores, 255 iterations | 3953 | 79 |
 | a Julia set, hires | 1160 | 23 |
 
 With any fast RAM (an accelerator) it is several times faster, because on a stock A1200 the CPU shares chip RAM with the
