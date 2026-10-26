@@ -11,7 +11,7 @@ HDR     = $(wildcard *.h)
 all: amigamand amigamand-fpu
 
 # fixed point: no FPU needed
-amigamand: $(SRC:%.c=build/fix/%.o)
+amigamand: $(SRC:%.c=build/fix/%.o) build/fix/iter020.o
 	$(CC) +aos68k -cpu=68020 -o $@ $^
 
 # FPU: needs a 68881/68882/68040+
@@ -21,6 +21,10 @@ amigamand-fpu: $(SRC:%.c=build/fpu/%.o)
 build/fix/%.o: %.c $(HDR)
 	@mkdir -p build/fix
 	$(CC) $(CFLAGS) -c -o $@ $<
+
+build/fix/iter020.o: iter020.s
+	@mkdir -p build/fix
+	$(CC) +aos68k -cpu=68020 -c -o $@ $<
 
 build/fpu/%.o: %.c $(HDR)
 	@mkdir -p build/fpu

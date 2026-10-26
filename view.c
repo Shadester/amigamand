@@ -3,6 +3,8 @@
 #include "view.h"
 
 struct view V;
+static WORD per_on = 1, per_n; /* the periodicity check: on; inside pixels seen while it was on */
+static LONG per_saved, per_spent; /* iterations it saved, iterations done while it was on */
 static num saved_cx, saved_cy, saved_span; /* the Mandelbrot view while a Julia set is shown */
 
 #ifdef USE_FPU
@@ -11,6 +13,7 @@ static num saved_cx, saved_cy, saved_span; /* the Mandelbrot view while a Julia 
 #define NFRAC(a, b) ((double)(a) / (b))
 #define NQ(a) ((a) * 0.25)
 #define MINDX 2e-13 /* below this the doubles run out of digits at |x| ~ 1 */
+#define EPS 1e-9    /* how close the orbit must come back to count as periodic */
 #else
 #define FB 24
 #define ONE (1L << FB)
@@ -22,6 +25,7 @@ LONG fxmul(__reg("d0") LONG, __reg("d1") LONG) =
 	"\tand.l\t#255,d0\n"
 	"\tor.l\td1,d0\n";
 #define NMUL(a, b) fxmul(a, b)
+LONG iter_loop(__reg("a0") const LONG *); /* iter020.s */
 /* The high long of a 32x32 muls.l: with Q4.28 operands the square comes out as Q8.24 with no shifting. */
 LONG mulhi(__reg("d0") LONG, __reg("d1") LONG) =
 	"\tmuls.l\td1,d1:d0\n"
@@ -43,6 +47,7 @@ static void prep(void)
 	if (V.cy < -lim) V.cy = -lim;
 	if (V.span > NI(6)) V.span = NI(6);
 	if (V.span < minspan) V.span = minspan;
+	per_on = 1, per_n = 0, per_saved = per_spent = 0;
 	V.dx = V.span / V.w;
 	V.dy = V.dx * V.ay / V.ax;
 	V.x0 = V.cx - V.dx * (V.w - 1) / 2;
@@ -145,7 +150,11 @@ int view_symmetric(void)
 static WORD iter(num pr, num pi)
 {
 	num cr, ci, zr, zi, zr2, zi2;
-	WORD i = 0, maxit = V.maxit;
+	WORD i = 0, maxit = V.maxit, hit = 0; /* hit: the iteration where a cycle was seen */
+#ifdef USE_FPU
+	num sr, si; /* the state saved for the periodicity check (Brent) */
+	WORD cnt = 0, nxt = 1, per = per_on;
+#endif
 
 	if (V.julia) {
 		cr = V.jr, ci = V.ji;
@@ -164,16 +173,32 @@ static WORD iter(num pr, num pi)
 #ifdef USE_FPU
 	zr2 = NMUL(zr, zr);
 	zi2 = NMUL(zi, zi);
+	sr = zr, si = zi;
 	while (i < maxit && zr2 + zi2 <= NI(4)) {
 		zi = NMUL(zr, zi) * 2 + ci;
 		zr = zr2 - zi2 + cr;
 		zr2 = NMUL(zr, zr);
 		zi2 = NMUL(zi, zi);
 		i++;
+		if (per) { /* periodic: back within EPS of a state saved at iterations 1, 2, 4, ... (a guess, see iter020.s) */
+			num d = zr - sr;
+
+			if (d < EPS && d > -EPS) {
+				d = zi - si;
+				if (d < EPS && d > -EPS) {
+					hit = i;
+					i = maxit;
+					break;
+				}
+			}
+			if (++cnt == nxt)
+				sr = zr, si = zi, nxt <<= 1, cnt = 0;
+		}
 	}
 #else
 	/* z and c in Q4.28 (|z| <= 6.8 before the test, c <= 6), squares in Q8.24 */
 	cr <<= 4, ci <<= 4, zr <<= 4, zi <<= 4;
+#ifdef C_LOOP /* the same loop in C, without the periodicity check: the reference for the assembly one */
 	zr2 = mulhi(zr, zr);
 	zi2 = mulhi(zi, zi);
 	while (i < maxit && zr2 + zi2 <= NI(4)) {
@@ -183,7 +208,27 @@ static WORD iter(num pr, num pi)
 		zi2 = mulhi(zi, zi);
 		i++;
 	}
+#else
+	{
+		LONG a[7];
+
+		a[0] = zr, a[1] = zi, a[2] = cr, a[3] = ci, a[4] = maxit, a[5] = per_on, a[6] = 0;
+		i = iter_loop(a);
+		hit = a[6];
+	}
 #endif
+#endif
+	if (per_on) { /* the check costs a fifth: keep it only while what it saves is a good part of what it spends */
+		if (hit)
+			per_saved += maxit - hit, per_spent += hit, per_n++;
+		else {
+			per_spent += i;
+			if (i >= maxit)
+				per_n++;
+		}
+		if (per_n >= 64 && per_saved * 4 < per_spent)
+			per_on = 0;
+	}
 	return i;
 }
 
