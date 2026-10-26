@@ -180,4 +180,7 @@ with 2 bitplanes (`DEPTH 2`). Any fast RAM removes that.
 
 ## Licence
 
-None has been chosen yet, so by default all rights are reserved. Ask, or open an issue.
+MIT, see `LICENSE`. That covers the source, the programs, the icons and the pictures in this repository.
+
+The Amiga cross compiler (vbcc, vasm, vlink) and the NDK headers that `tools/setup.sh` downloads are not part of it and have
+their own terms, as do your Kickstart ROM and Workbench disk, which this repository neither contains nor needs to contain.

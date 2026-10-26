@@ -74,4 +74,5 @@ The fixed point version has 24 bits of fraction: below a span of about 1e-4 the
 picture gets blocky. Use amigamand-fpu there.
 Made and tested in an emulator (FS-UAE) only. Not yet tried on a real Amiga.
 
-Source, tests, notes: https://github.com/Shadester/amigamand
+Licence: MIT (see the repository). Source, tests, notes:
+https://github.com/Shadester/amigamand
