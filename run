@@ -4,16 +4,17 @@
 #
 #   ./run [fpu] [start options ...]       ./run MODE 0 ITER 255      ./run fpu JULIA
 #
-# fpu runs amigamand-fpu on an emulated 68030 with a 68882. CPU= and FPU= set another machine for either program
-# (CPU=68030 FPU=68882 ./run). KICKSTART=file and WB=file name another ROM and Workbench HDF (read-only).
-# ./tools/run.sh boots the full Workbench instead.
+# The machine is the fastest one worth emulating: a 68040 with its own FPU (a stock 68020 takes 30 times as long for the
+# same picture; a 68060, more fast RAM or "max speed" gave no gain). fpu runs amigamand-fpu instead of amigamand.
+# CPU= and FPU= change the machine: CPU=68020 FPU= ./run is a stock A1200, CPU=68030 FPU=68882 ./run a 68030.
+# KICKSTART=file and WB=file name another ROM and Workbench HDF (read-only). ./tools/run.sh boots the full Workbench.
 cd "$(dirname "$0")" || exit 1
 BIN=amigamand
 if [ "$1" = fpu ]; then
     shift
     BIN=amigamand-fpu
-    : "${CPU:=68030}" "${FPU:=68882}"
 fi
+: "${CPU=68040}" "${FPU=68040}"
 make >/dev/null || exit 1
 FSUAE=$HOME/Documents/FS-UAE
 ROM=${KICKSTART:-$FSUAE/Kickstarts/Kickstart-v3.1-rev-40.68-1993-Commodore-A1200.rom}

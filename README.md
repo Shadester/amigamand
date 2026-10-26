@@ -65,8 +65,8 @@ they were built on a Mac. Then:
     python3 tools/make_icon.py     # the .info files, if you change the tool types
 
 `./run` builds and starts the program at once in FS-UAE (an A1200 with your own Kickstart 3.1 ROM and Workbench 3.1 disk in
-`~/Documents/FS-UAE`); start options go after it: `./run MODE 0 ITER 255`, and `./run fpu JULIA` runs the FPU build on an
-emulated 68030 with a 68882. Esc quits the program. FS-UAE gives the mouse back with Cmd+G (or F12+G).
+`~/Documents/FS-UAE`); start options go after it: `./run MODE 0 ITER 255`, and `./run fpu JULIA` runs the FPU build. The emulated machine is a 68040, the fastest
+setup that makes a difference (`CPU=68020 FPU= ./run` is a stock A1200, 30 times slower). Esc quits the program. FS-UAE gives the mouse back with Cmd+G (or F12+G).
 
 `tools/run.sh` boots the whole Workbench instead and starts the build (an A1200 with your own Kickstart 3.1 ROM and Workbench 3.1 disk in
 `~/Documents/FS-UAE`). `CPU=68030 FPU=68882 tools/run.sh` emulates a faster machine.
