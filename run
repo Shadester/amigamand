@@ -1,0 +1,38 @@
+#!/bin/sh
+# Builds amigamand and starts it in FS-UAE (an Amiga 1200, AGA) at once, with the Workbench disk's libraries available
+# (asl.library for the requesters, rexxsyslib). Quit the program with Esc; the emulator window shows a Shell after that.
+#
+#   ./run [fpu] [start options ...]       ./run MODE 0 ITER 255      ./run fpu JULIA
+#
+# fpu runs amigamand-fpu on an emulated 68030 with a 68882. CPU= and FPU= set another machine for either program
+# (CPU=68030 FPU=68882 ./run). KICKSTART=file and WB=file name another ROM and Workbench HDF (read-only).
+# ./tools/run.sh boots the full Workbench instead.
+cd "$(dirname "$0")" || exit 1
+BIN=amigamand
+if [ "$1" = fpu ]; then
+    shift
+    BIN=amigamand-fpu
+    : "${CPU:=68030}" "${FPU:=68882}"
+fi
+make >/dev/null || exit 1
+FSUAE=$HOME/Documents/FS-UAE
+ROM=${KICKSTART:-$FSUAE/Kickstarts/Kickstart-v3.1-rev-40.68-1993-Commodore-A1200.rom}
+WB=${WB:-$FSUAE/Hard Drives/workbench-311.hdf}
+EMU=${EMULATOR:-/Applications/FS-UAE.app/Contents/MacOS/fs-uae}
+[ -f "$ROM" ] || { echo "No Kickstart ROM at $ROM (set KICKSTART=)" >&2; exit 1; }
+[ -f "$WB" ] || { echo "No Workbench HDF at $WB (set WB=)" >&2; exit 1; }
+[ -x "$EMU" ] || { echo "$EMU not found (brew install --cask fs-uae-emulator)" >&2; exit 1; }
+
+rm -rf build/go && mkdir -p build/go/S || exit 1
+cp "$BIN" build/go/prog || exit 1
+cat > build/go/S/Startup-Sequence <<SEQ
+Workbench3.1:C/Assign LIBS: Workbench3.1:Libs ADD
+Workbench3.1:C/MakeDir RAM:ENV
+Workbench3.1:C/Assign ENV: RAM:ENV
+SYS:prog $*
+SEQ
+set -- ${CPU:+--cpu=$CPU} ${FPU:+--uae_fpu_model=$FPU}
+exec "$EMU" --amiga_model=A1200 --kickstart_file="$ROM" "$@" \
+    --hard_drive_0=build/go --hard_drive_0_label=SYS \
+    --hard_drive_1="$WB" --hard_drive_1_read_only=1 \
+    --joystick_port_1=none --fullscreen=0 --window_width=960 --window_height=720 --floppy_drive_volume=0
