@@ -30,7 +30,27 @@ build/fpu/%.o: %.c $(HDR)
 	@mkdir -p build/fpu
 	$(CC) $(CFLAGS) -DUSE_FPU -fpu=68881 -c -o $@ $<
 
+# test builds (tools/test): the first render ends with a mouse gesture, see TEST_MOUSE in main.c
+amigamand-tm%: build/tm%/main.o $(filter-out build/fix/main.o,$(SRC:%.c=build/fix/%.o)) build/fix/iter020.o
+	$(CC) +aos68k -cpu=68020 -o $@ $^
+
+build/tm%/main.o: main.c $(HDR)
+	@mkdir -p build/tm$*
+	$(CC) $(CFLAGS) -DTEST_MOUSE=$* -c -o $@ $<
+
+# test builds for tools/test: a start from Workbench (tool types of SYS:prog.info), and the icon check
+amigamand-tw: $(SRC:%.c=build/tw/%.o) build/fix/iter020.o
+	$(CC) +aos68k -cpu=68020 -o $@ $^
+
+build/tw/%.o: %.c $(HDR)
+	@mkdir -p build/tw
+	$(CC) $(CFLAGS) -DTEST_WB -c -o $@ $<
+
+build/icontest: tools/test/icontest.c
+	@mkdir -p build
+	$(CC) $(CFLAGS) -o $@ $<
+
 clean:
-	rm -rf amigamand amigamand-fpu build/fix build/fpu
+	rm -rf amigamand amigamand-fpu amigamand-tm1 amigamand-tm2 amigamand-tw build/fix build/fpu build/tm1 build/tm2 build/tw build/icontest
 
 .PHONY: all clean

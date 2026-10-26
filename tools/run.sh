@@ -15,7 +15,7 @@ EMU=${EMULATOR:-/Applications/FS-UAE.app/Contents/MacOS/fs-uae}
 [ -x "$EMU" ] || { echo "$EMU not found (brew install --cask fs-uae-emulator)" >&2; exit 1; }
 
 rm -rf build/hd && mkdir -p build/hd || exit 1
-cp amigamand amigamand-fpu build/hd/ || exit 1
+cp amigamand amigamand-fpu amigamand.info amigamand-fpu.info build/hd/ || exit 1
 set -- ${CPU:+--cpu=$CPU} ${FPU:+--uae_fpu_model=$FPU}
 exec "$EMU" --amiga_model=A1200 --kickstart_file="$ROM" "$@" \
     --hard_drive_0="$WB" --hard_drive_0_read_only=1 \

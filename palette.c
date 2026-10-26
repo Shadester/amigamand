@@ -27,14 +27,21 @@ const char *pal_name(WORD i)
 	return pals[i].name;
 }
 
+WORD pal_reserved(WORD ncol)
+{
+	return ncol >= 16 ? 4 : 1;
+}
+
 void pal_make(WORD i, WORD ncol, UBYTE *rgb)
 {
+	static const UBYTE ui[4][3] = { { 0, 0, 0 }, { 255, 255, 255 }, { 170, 170, 170 }, { 0, 90, 200 } };
 	const struct pal *p = &pals[i];
-	WORD pen, k = 0;
+	WORD pen, k = 0, nres = pal_reserved(ncol);
 
-	rgb[0] = rgb[1] = rgb[2] = 0;
-	for (pen = 1; pen < ncol; pen++) {
-		LONG pos = ncol > 2 ? (LONG)(pen - 1) * 255 / (ncol - 2) : 0, span, t;
+	for (pen = 0; pen < nres; pen++)
+		rgb[pen * 3] = ui[pen][0], rgb[pen * 3 + 1] = ui[pen][1], rgb[pen * 3 + 2] = ui[pen][2];
+	for (pen = nres; pen < ncol; pen++) {
+		LONG pos = ncol - nres > 1 ? (LONG)(pen - nres) * 255 / (ncol - nres - 1) : 0, span, t;
 		const struct stop *a, *b;
 
 		while (k < p->n - 2 && pos >= p->s[k + 1].pos)

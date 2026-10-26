@@ -1,4 +1,9 @@
 amigamand
 amigamand-fpu
+amigamand-tm1
+amigamand-tm2
+amigamand-tw
 toolchain/
 build/
+tools/test/.venv/
+tools/test/__pycache__/

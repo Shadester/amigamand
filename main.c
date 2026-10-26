@@ -136,6 +136,8 @@ static BOOL fast = TRUE, use_ms, preview_pending, tile_open, tile_solid;
 static UBYTE solid_pen;
 static LONG t_start, t_elapsed, exit_rc;
 static num last_re, last_im;
+static WORD sx, sy, bx, by, bw; /* mouse drag: the start, and the box shown (corner, width) */
+static BOOL band_on;
 static char status[48];
 
 static struct {
@@ -194,10 +196,10 @@ static void show_title(void)
 
 static void build_lut(void)
 {
-	WORD it;
+	WORD it, nres = pal_reserved(ncol);
 
 	for (it = 0; it < V.maxit; it++)
-		lut[it] = 1 + it * (ncol - 2) / V.maxit;
+		lut[it] = nres + it * (ncol - nres - 1) / V.maxit;
 	lut[V.maxit] = 0; /* inside the set */
 }
 
@@ -245,6 +247,10 @@ static BOOL next_row(WORD *y, WORD *rep)
 }
 
 static LONG do_save(const char *name);
+#ifdef TEST_MOUSE
+static void mouse_move(WORD mx, WORD my);
+static void mouse_up(WORD mx, WORD my);
+#endif
 
 static void render_done(void)
 {
@@ -264,6 +270,26 @@ static void render_done(void)
 	}
 	if (opt.quit)
 		quitting = TRUE;
+#ifdef TEST_MOUSE /* a test build: the first render ends with a mouse gesture, through the handlers the mouse uses */
+	{
+		static WORD gestures;
+
+		if (gestures++ == 0) {
+			dragging = TRUE;
+#if TEST_MOUSE == 1 /* drag a box from (60,40) with a corner at (140,60) */
+			sx = 60, sy = 40;
+			view_point(sx, sy, &last_re, &last_im);
+			have_last = TRUE;
+			mouse_move(100, 50);
+			mouse_move(140, 60);
+			mouse_up(140, 60);
+#else /* click at (200,100) */
+			sx = 200, sy = 100;
+			mouse_up(201, 100);
+#endif
+		}
+	}
+#endif
 }
 
 /* A block of pens to the screen: our own conversion when it is 8-pixel aligned, graphics.library otherwise. */
@@ -437,10 +463,10 @@ static void render_step(void)
 static void pal_apply(void)
 {
 	static ULONG t[3 * 256 + 2];
-	WORD i, src;
+	WORD i, src, nres = pal_reserved(ncol);
 
 	for (i = 0; i < ncol; i++) {
-		src = i ? 1 + (i - 1 + cyc_off) % (ncol - 1) : 0;
+		src = i < nres ? i : nres + (i - nres + cyc_off) % (ncol - nres); /* only the gradient turns */
 		cur_rgb[i * 3] = rgb[src * 3], cur_rgb[i * 3 + 1] = rgb[src * 3 + 1], cur_rgb[i * 3 + 2] = rgb[src * 3 + 2];
 		t[1 + i * 3] = cur_rgb[i * 3] * 0x01010101UL;
 		t[2 + i * 3] = cur_rgb[i * 3 + 1] * 0x01010101UL;
@@ -584,7 +610,7 @@ static void act_save_ui(void)
 
 	if (!AslBase)
 		AslBase = OpenLibrary("asl.library", 37);
-	if (AslBase && (fr = AllocAslRequestTags(ASL_FileRequest, ASLFR_Screen, scr, ASLFR_TitleText, "Save ILBM",
+	if (AslBase && (fr = AllocAslRequestTags(ASL_FileRequest, ASLFR_Screen, scr, ASLFR_Activate, TRUE, ASLFR_TitleText, "Save ILBM",
 						 ASLFR_DoSaveMode, TRUE, ASLFR_InitialFile, "amigamand.iff",
 						 ASLFR_InitialDrawer, "RAM:", TAG_END))) {
 		if (AslRequest(fr, NULL)) {
@@ -611,7 +637,7 @@ static LONG act_other_mode(void)
 		show_title();
 		return rc;
 	}
-	smr = AllocAslRequestTags(ASL_ScreenModeRequest, ASLSM_Screen, scr, ASLSM_TitleText, "Screen mode",
+	smr = AllocAslRequestTags(ASL_ScreenModeRequest, ASLSM_Screen, scr, ASLSM_Activate, TRUE, ASLSM_TitleText, "Screen mode",
 				  ASLSM_DoWidth, TRUE, ASLSM_DoHeight, TRUE, ASLSM_DoDepth, TRUE, ASLSM_MinDepth, 2,
 				  ASLSM_MaxDepth, 8, ASLSM_InitialDisplayID, modes[mode].id,
 				  ASLSM_InitialDisplayWidth, modes[mode].w, ASLSM_InitialDisplayHeight, modes[mode].h,
@@ -830,8 +856,6 @@ static LONG do_command(const char *line, char *res, LONG n)
 
 /* ---- mouse, keys ---- */
 
-static WORD sx, sy, bx, by, bw; /* drag start, and the box shown: corner, width */
-static BOOL band_on;
 
 static void band(void) /* draws or erases the zoom box */
 {
@@ -944,8 +968,8 @@ static void handle(struct IntuiMessage *msg)
 			mouse_move(mx, my);
 		break;
 	case IDCMP_INTUITICKS:
-		if (cycle && ncol > 2) {
-			cyc_off = (cyc_off + 1) % (ncol - 1);
+		if (cycle && ncol - pal_reserved(ncol) > 1) {
+			cyc_off = (cyc_off + 1) % (ncol - pal_reserved(ncol));
 			pal_apply();
 		}
 		break;
@@ -1066,10 +1090,23 @@ int main(int argc, char **argv)
 	}
 	init_modes();
 	view_reset();
+#ifdef TEST_WB /* a test build: read the tool types of SYS:prog.info as if Workbench had started the program */
+	{
+		static struct WBArg arg;
+		static struct WBStartup wbs;
+
+		arg.wa_Lock = Lock("SYS:", ACCESS_READ);
+		arg.wa_Name = "prog";
+		wbs.sm_NumArgs = 1;
+		wbs.sm_ArgList = &arg;
+		wb_opts(&wbs);
+	}
+#else
 	if (argc == 0)
 		wb_opts((struct WBStartup *)argv);
 	else
 		cli_opts();
+#endif
 	if (quitting)
 		goto out;
 	if (opt.mode >= 0 && opt.mode < NPRESET)
