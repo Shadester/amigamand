@@ -217,7 +217,8 @@ def other_mode_requester():
     a = Image.open(before).convert('RGB').crop((400, 300, 1500, 1100))
     b = Image.open(after).convert('RGB').crop((400, 300, 1500, 1100))
     assert max(ImageStat.Stat(ImageChops.difference(a, b)).mean) > 20, 'no requester on the screen'
-    light = sum(1 for px in b.getdata() if min(px) > 200)
+    raw = b.tobytes()
+    light = sum(1 for i in range(0, len(raw), 3) if min(raw[i:i + 3]) > 200)
     assert light > 500, 'the requester has no light text on its dark background'
 
 
