@@ -7,3 +7,4 @@ toolchain/
 build/
 tools/test/.venv/
 tools/test/__pycache__/
+__pycache__/
