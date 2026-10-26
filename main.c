@@ -26,6 +26,8 @@
 #include "rexx.h"
 #include "c2p.h"
 
+const char version[] = "$VER: amigamand 1.0 (25.10.2026)"; /* what the AmigaDOS Version command reports */
+
 struct IntuitionBase *IntuitionBase;
 struct GfxBase *GfxBase;
 struct Library *GadToolsBase, *AslBase, *IconBase;
