@@ -35,6 +35,7 @@ int view_zoomed(void);                            /* the span is under 0.5: big 
 int view_symmetric(void);                         /* 0 none, 1 rows y and h-1-y are equal, 2 turned half way round */
 void view_row(WORD y, UBYTE *dst, const UBYTE *lut);   /* the pens of row y; lut maps an iteration count to a pen */
 void view_run(WORD x, WORD y, WORD n, UBYTE *dst, const UBYTE *lut); /* the pens of n pixels along row y */
+void view_line(WORD x, WORD y, WORD n, WORD horiz, UBYTE *dst, const UBYTE *lut); /* ... along a row or a column (dst steps by 1 or by w) */
 UBYTE view_pen(WORD x, WORD y, const UBYTE *lut);   /* the pen of one pixel */
 
 const char *num_parse(const char *s, num *out);   /* returns the end, or NULL if no number */

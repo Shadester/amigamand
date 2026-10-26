@@ -210,20 +210,23 @@ static WORD iter(num pr, num pi)
 }
 #endif
 
-/* The pens of n pixels along row y from x; lut turns an iteration count into a pen. */
-void view_run(WORD x, WORD y, WORD n, UBYTE *dst, const UBYTE *lut)
+/* The pens of n pixels from (x, y) along a row (horiz) or a column; lut turns an iteration count into a pen.
+   dst steps one byte along a row, or the width of the picture down a column. */
+void view_line(WORD x, WORD y, WORD n, WORD horiz, UBYTE *dst, const UBYTE *lut)
 {
 #ifdef USE_FPU
-	num ci = V.y0 + y * V.dy, cr = V.x0 + x * V.dx;
+	num ci = V.y0 + y * V.dy, cr = V.x0 + x * V.dx, sr = horiz ? V.dx : 0, si = horiz ? 0 : V.dy;
+	LONG step = horiz ? 1 : V.w;
 
-	for (; n > 0; n--, cr += V.dx)
-		*dst++ = lut[iter(cr, ci)];
+	for (; n > 0; n--, cr += sr, ci += si, dst += step)
+		*dst = lut[iter(cr, ci)];
 #else
-	LONG a[15];
+	LONG a[17];
 
-	a[0] = V.x0 + x * V.dx, a[1] = V.dx, a[2] = V.y0 + y * V.dy, a[3] = n, a[4] = V.maxit, a[5] = per_on;
+	a[0] = V.x0 + x * V.dx, a[1] = horiz ? V.dx : 0, a[2] = V.y0 + y * V.dy, a[3] = n, a[4] = V.maxit, a[5] = per_on;
 	a[6] = V.julia, a[7] = V.jr << 4, a[8] = V.ji << 4, a[9] = (LONG)dst, a[10] = (LONG)lut;
 	a[11] = a[12] = a[13] = a[14] = 0;
+	a[15] = horiz ? 0 : V.dy, a[16] = horiz ? 1 : V.w;
 	run_loop(a);
 	if (per_on) {
 		per_saved += a[11], per_spent += a[12], per_n += a[13];
@@ -231,6 +234,11 @@ void view_run(WORD x, WORD y, WORD n, UBYTE *dst, const UBYTE *lut)
 			per_on = 0;
 	}
 #endif
+}
+
+void view_run(WORD x, WORD y, WORD n, UBYTE *dst, const UBYTE *lut)
+{
+	view_line(x, y, n, 1, dst, lut);
 }
 
 UBYTE view_pen(WORD x, WORD y, const UBYTE *lut)

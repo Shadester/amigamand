@@ -1,10 +1,10 @@
 ; The pixel loop of the fixed-point build, in registers (vbcc spills most of it to the stack, and a call for every pixel
 ; costs more than the few iterations most pixels need).
 ;
-;   void run_loop(__reg("a0") LONG *a)       a = the block below, the pens of n pixels go to dst
+;   void run_loop(__reg("a0") LONG *a)       a = the block below, the pens of n pixels along a row or column go to dst
 ;
 ;   0 cr (Q8.24, of the next pixel)   4 dx   8 ci   12 n   16 maxit   20 check   24 julia
-;   28 jr (Q4.28)   32 ji   36 dst   40 lut   44 saved   48 spent   52 count   56 hit
+;   28 jr (Q4.28)   32 ji   36 dst   40 lut   44 saved   48 spent   52 count   56 hit   60 di (step of ci)   64 dst step
 ;
 ; Each pixel is what view.c's C loop used to do (squares in Q8.24 are the high long of muls.l, z and c in Q4.28):
 ;   Mandelbrot: |c| > 2 is 1 iteration at once; inside the main cardioid or the period-2 bulb is maxit at once;
@@ -224,10 +224,13 @@ _run_loop:
 	move.l	40(a0),a1
 	move.b	(a1,d7.l),d0
 	move.l	36(a0),a1
-	move.b	d0,(a1)+
+	move.b	d0,(a1)
+	adda.l	64(a0),a1
 	move.l	a1,36(a0)
 	move.l	4(a0),d0
-	add.l	d0,(a0)			; the next pixel
+	add.l	d0,(a0)			; the next pixel: re and im step, dst steps
+	move.l	60(a0),d0
+	add.l	d0,8(a0)
 	subq.l	#1,12(a0)
 	bgt	.pixel
 .exit:

@@ -367,25 +367,49 @@ static void push(WORD x0, WORD y0, WORD x1, WORD y1)
 	sp++;
 }
 
-/* One rectangle: if its whole border has one pen so has the inside (the set is connected), else cut it in four. */
+/* The pens along a line, for the stretches not computed yet: a call for each, not for each pixel. */
+static void line(WORD x, WORD y, WORD n, BOOL horiz)
+{
+	LONG step = horiz ? 1 : V.w;
+	UBYTE *p = img + (LONG)y * V.w + x;
+	WORD i = 0, j;
+
+	while (i < n) {
+		if (p[i * step] != UNSET) {
+			i++;
+			continue;
+		}
+		for (j = i; j < n && p[j * step] == UNSET; j++)
+			;
+		view_line(horiz ? x + i : x, horiz ? y : y + i, j - i, horiz, p + i * step, lut);
+		i = j;
+	}
+}
+
+/* One rectangle: if its whole border has one pen so has the inside (the set is connected), else cut it in four.
+   The children's borders are this one's and the two lines through the middle, so nothing is computed twice. */
 static void ms_rect(WORD x0, WORD y0, WORD x1, WORD y1, BOOL root)
 {
 	WORD x, y, xm, ym;
-	UBYTE p;
+	UBYTE p, *top, *bottom;
 	BOOL same = TRUE;
 
 	if (x1 - x0 < 3 || y1 - y0 < 3) { /* too small to cut: the few pixels left */
 		for (y = y0; y <= y1; y++)
-			for (x = x0; x <= x1; x++)
-				pix(x, y);
+			line(x0, y, x1 - x0 + 1, TRUE);
 		return;
 	}
-	p = pix(x0, y0);
+	line(x0, y0, x1 - x0 + 1, TRUE);
+	line(x0, y1, x1 - x0 + 1, TRUE);
+	line(x0, y0 + 1, y1 - y0 - 1, FALSE);
+	line(x1, y0 + 1, y1 - y0 - 1, FALSE);
+	top = img + (LONG)y0 * V.w, bottom = img + (LONG)y1 * V.w;
+	p = top[x0];
 	for (x = x0; x <= x1 && same; x++)
-		if (pix(x, y0) != p || pix(x, y1) != p)
+		if (top[x] != p || bottom[x] != p)
 			same = FALSE;
 	for (y = y0 + 1; y < y1 && same; y++)
-		if (pix(x0, y) != p || pix(x1, y) != p)
+		if (img[(LONG)y * V.w + x0] != p || img[(LONG)y * V.w + x1] != p)
 			same = FALSE;
 	if (same) {
 		for (y = y0 + 1; y < y1; y++)
