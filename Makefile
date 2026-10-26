@@ -46,11 +46,15 @@ build/tw/%.o: %.c $(HDR)
 	@mkdir -p build/tw
 	$(CC) $(CFLAGS) -DTEST_WB -c -o $@ $<
 
+build/spawn: tools/test/spawn.c
+	@mkdir -p build
+	$(CC) $(CFLAGS) -o $@ $<
+
 build/icontest: tools/test/icontest.c
 	@mkdir -p build
 	$(CC) $(CFLAGS) -o $@ $<
 
 clean:
-	rm -rf amigamand amigamand-fpu amigamand-tm1 amigamand-tm2 amigamand-tw build/fix build/fpu build/tm1 build/tm2 build/tw build/icontest
+	rm -rf amigamand amigamand-fpu amigamand-tm1 amigamand-tm2 amigamand-tw build/fix build/fpu build/tm1 build/tm2 build/tw build/icontest build/spawn
 
 .PHONY: all clean

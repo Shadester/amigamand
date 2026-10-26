@@ -275,6 +275,27 @@ def workbench_tooltypes():
     assert got.size == ref.size and amiga.differ(got, ref) == 0, 'the tool types did not give the same picture as the options'
 
 
+@test
+def arexx():
+    """The real ARexx (RexxMast and RX from the Workbench disk) drives the port: commands, a result string, error codes."""
+    import subprocess
+    subprocess.run(['make', 'build/spawn'], cwd=ROOT, check=True, stdout=subprocess.DEVNULL)
+    seq = ('Workbench3.1:C/MakeDir RAM:T\nWorkbench3.1:C/Assign T: RAM:T\n'     # ARexx wants T:
+           'SYS:spawn Workbench3.1:System/RexxMast\nWorkbench3.1:C/Wait 3\n'
+           'SYS:spawn SYS:prog MODE 0\nWorkbench3.1:Rexxc/WaitForPort AMIGAMAND\n'
+           'Workbench3.1:Rexxc/RX SYS:test.rexx >SYS:rx.txt')
+    files = [os.path.join(ROOT, 'build', 'spawn'), os.path.join(HERE, 'test.rexx')]
+    with amiga.Session(os.path.join(ROOT, 'amigamand'), files=files, full=True, seq=seq, extra=amiga.MACHINES['030'][1]) as s:
+        assert s.wait_file('rx.txt', until='end', timeout=300), 'the script did not finish'
+        txt = open(s.path('rx.txt'), 'rb').read().decode('latin1')
+        time.sleep(3)
+        im, _ = amiga.decode(s.path('rx.iff'))
+    for want in ('query: MANDELBROT ', ' 64 320x256x8 Fire DONE', 'save rc 0', 'bad rc 10', 'bad palette rc 10', 'quit rc 0'):
+        assert want in txt, f'missing {want!r} in what ARexx printed:\n{txt}'
+    _, ref = batch('030', 'MODE 0 ITER 64 PALETTE Fire')
+    assert amiga.differ(im, ref) == 0, 'the saved picture differs from the batch render'
+
+
 def main():
     update = '--update' in sys.argv
     names = [a for a in sys.argv[1:] if not a.startswith('--')] or list(TESTS)
