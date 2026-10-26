@@ -17,22 +17,9 @@ static num saved_cx, saved_cy, saved_span; /* the Mandelbrot view while a Julia 
 #else
 #define FB 24
 #define ONE (1L << FB)
-/* (a*b) >> 24 from one muls.l: hi<<8 | lo>>24. vbcc would call 64-bit helpers for long long. */
-LONG fxmul(__reg("d0") LONG, __reg("d1") LONG) =
-	"\tmuls.l\td1,d1:d0\n"
-	"\tlsl.l\t#8,d1\n"
-	"\trol.l\t#8,d0\n"
-	"\tand.l\t#255,d0\n"
-	"\tor.l\td1,d0\n";
-#define NMUL(a, b) fxmul(a, b)
-LONG iter_loop(__reg("a0") const LONG *); /* iter020.s */
-/* The high long of a 32x32 muls.l: with Q4.28 operands the square comes out as Q8.24 with no shifting. */
-LONG mulhi(__reg("d0") LONG, __reg("d1") LONG) =
-	"\tmuls.l\td1,d1:d0\n"
-	"\tmove.l\td1,d0\n";
+void run_loop(__reg("a0") LONG *); /* the pixel loop, iter020.s */
 #define NI(i) ((LONG)(i) << FB)
 #define NFRAC(a, b) ((LONG)(a) * ONE / (b)) /* |a| <= 127 */
-#define NQ(a) ((a) >> 2)
 #define MINDX 16 /* units of 2^-24: about 1e-6 per pixel */
 #endif
 
@@ -128,6 +115,12 @@ void view_julia(num re, num im)
 		V.span = NFRAC(7, 2);
 	}
 	V.jr = re, V.ji = im;
+#ifndef USE_FPU
+	if (V.jr > NI(4)) V.jr = NI(4); /* the loop keeps c in Q4.28 */
+	if (V.jr < -NI(4)) V.jr = -NI(4);
+	if (V.ji > NI(4)) V.ji = NI(4);
+	if (V.ji < -NI(4)) V.ji = -NI(4);
+#endif
 	prep();
 }
 
@@ -140,6 +133,11 @@ void view_mandel(void)
 	}
 }
 
+int view_zoomed(void)
+{
+	return V.span < NFRAC(1, 2);
+}
+
 int view_symmetric(void)
 {
 	if (V.julia) /* z and -z give the same orbit: the picture is the same turned half way round */
@@ -147,14 +145,26 @@ int view_symmetric(void)
 	return V.cy == 0 ? 1 : 0;
 }
 
+#ifdef USE_FPU
+/* the periodicity check pays on views with low-period components and costs a fifth elsewhere: keep it only while
+   what it saves is a good part of what it spends */
+static void per_account(WORD hit, WORD i, WORD maxit)
+{
+	if (hit)
+		per_saved += maxit - hit, per_spent += hit, per_n++;
+	else {
+		per_spent += i;
+		if (i >= maxit)
+			per_n++;
+	}
+	if (per_n >= 64 && per_saved * 4 < per_spent)
+		per_on = 0;
+}
+
 static WORD iter(num pr, num pi)
 {
-	num cr, ci, zr, zi, zr2, zi2;
-	WORD i = 0, maxit = V.maxit, hit = 0; /* hit: the iteration where a cycle was seen */
-#ifdef USE_FPU
-	num sr, si; /* the state saved for the periodicity check (Brent) */
-	WORD cnt = 0, nxt = 1, per = per_on;
-#endif
+	num cr, ci, zr, zi, zr2, zi2, sr, si; /* sr, si: the state saved for the periodicity check (Brent) */
+	WORD i = 0, maxit = V.maxit, hit = 0, cnt = 0, nxt = 1, per = per_on;
 
 	if (V.julia) {
 		cr = V.jr, ci = V.ji;
@@ -162,23 +172,22 @@ static WORD iter(num pr, num pi)
 	} else {
 		/* the main cardioid and the period-2 bulb are inside; only near them, so the products stay small */
 		if (pr > -NFRAC(3, 2) && pr < NFRAC(1, 2) && pi > -NI(1) && pi < NI(1)) {
-			num xm = pr - NFRAC(1, 4), yy = NMUL(pi, pi), q = NMUL(xm, xm) + yy, xb = pr + NI(1);
+			num xm = pr - NFRAC(1, 4), yy = pi * pi, q = xm * xm + yy, xb = pr + NI(1);
 
-			if (NMUL(q, q + xm) < NQ(yy) || NMUL(xb, xb) + yy < NFRAC(1, 16))
+			if (q * (q + xm) < yy * 0.25 || xb * xb + yy < NFRAC(1, 16))
 				return maxit;
 		}
 		cr = pr, ci = pi;
 		zr = zi = 0;
 	}
-#ifdef USE_FPU
-	zr2 = NMUL(zr, zr);
-	zi2 = NMUL(zi, zi);
+	zr2 = zr * zr;
+	zi2 = zi * zi;
 	sr = zr, si = zi;
 	while (i < maxit && zr2 + zi2 <= NI(4)) {
-		zi = NMUL(zr, zi) * 2 + ci;
+		zi = zr * zi * 2 + ci;
 		zr = zr2 - zi2 + cr;
-		zr2 = NMUL(zr, zr);
-		zi2 = NMUL(zi, zi);
+		zr2 = zr * zr;
+		zi2 = zi * zi;
 		i++;
 		if (per) { /* periodic: back within EPS of a state saved at iterations 1, 2, 4, ... (a guess, see iter020.s) */
 			num d = zr - sr;
@@ -195,57 +204,46 @@ static WORD iter(num pr, num pi)
 				sr = zr, si = zi, nxt <<= 1, cnt = 0;
 		}
 	}
-#else
-	/* z and c in Q4.28 (|z| <= 6.8 before the test, c <= 6), squares in Q8.24 */
-	cr <<= 4, ci <<= 4, zr <<= 4, zi <<= 4;
-#ifdef C_LOOP /* the same loop in C, without the periodicity check: the reference for the assembly one */
-	zr2 = mulhi(zr, zr);
-	zi2 = mulhi(zi, zi);
-	while (i < maxit && zr2 + zi2 <= NI(4)) {
-		zi = (mulhi(zr, zi) << 5) + ci; /* 2*zr*zi: |zr|, |zi| <= 2 here */
-		zr = ((zr2 - zi2) << 4) + cr;
-		zr2 = mulhi(zr, zr);
-		zi2 = mulhi(zi, zi);
-		i++;
-	}
-#else
-	{
-		LONG a[7];
+	if (per_on)
+		per_account(hit, i, maxit);
+	return i;
+}
+#endif
 
-		a[0] = zr, a[1] = zi, a[2] = cr, a[3] = ci, a[4] = maxit, a[5] = per_on, a[6] = 0;
-		i = iter_loop(a);
-		hit = a[6];
-	}
-#endif
-#endif
-	if (per_on) { /* the check costs a fifth: keep it only while what it saves is a good part of what it spends */
-		if (hit)
-			per_saved += maxit - hit, per_spent += hit, per_n++;
-		else {
-			per_spent += i;
-			if (i >= maxit)
-				per_n++;
-		}
+/* The pens of n pixels along row y from x; lut turns an iteration count into a pen. */
+void view_run(WORD x, WORD y, WORD n, UBYTE *dst, const UBYTE *lut)
+{
+#ifdef USE_FPU
+	num ci = V.y0 + y * V.dy, cr = V.x0 + x * V.dx;
+
+	for (; n > 0; n--, cr += V.dx)
+		*dst++ = lut[iter(cr, ci)];
+#else
+	LONG a[15];
+
+	a[0] = V.x0 + x * V.dx, a[1] = V.dx, a[2] = V.y0 + y * V.dy, a[3] = n, a[4] = V.maxit, a[5] = per_on;
+	a[6] = V.julia, a[7] = V.jr << 4, a[8] = V.ji << 4, a[9] = (LONG)dst, a[10] = (LONG)lut;
+	a[11] = a[12] = a[13] = a[14] = 0;
+	run_loop(a);
+	if (per_on) {
+		per_saved += a[11], per_spent += a[12], per_n += a[13];
 		if (per_n >= 64 && per_saved * 4 < per_spent)
 			per_on = 0;
 	}
-	return i;
+#endif
 }
 
-WORD view_pixel(WORD x, WORD y)
+UBYTE view_pen(WORD x, WORD y, const UBYTE *lut)
 {
-	return iter(V.x0 + x * V.dx, V.y0 + y * V.dy);
+	UBYTE p;
+
+	view_run(x, y, 1, &p, lut);
+	return p;
 }
 
-void view_row(WORD y, UBYTE *dst)
+void view_row(WORD y, UBYTE *dst, const UBYTE *lut)
 {
-	num ci = V.y0 + y * V.dy, cr = V.x0;
-	WORD x;
-
-	for (x = 0; x < V.w; x++) {
-		dst[x] = (UBYTE)iter(cr, ci);
-		cr += V.dx;
-	}
+	view_run(0, y, V.w, dst, lut);
 }
 
 char *put_uint(char *p, ULONG v)

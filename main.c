@@ -115,7 +115,7 @@ static struct Screen *scr;
 static struct Window *win;
 static struct Menu *menu;
 static APTR vi;
-static UBYTE *img, *rowbuf; /* the picture as pens, and one row of iteration counts */
+static UBYTE *img; /* the picture as pens */
 static WORD cdepth, ncol;
 static UBYTE lut[256];       /* iteration count -> pen */
 static UBYTE rgb[768], cur_rgb[768];
@@ -139,7 +139,7 @@ static num last_re, last_im;
 static char status[48];
 
 static struct {
-	WORD mode, iter, julia, quit, exact;
+	WORD mode, iter, julia, quit, exact, depth;
 	char cx[40], cy[40], span[40], jr[40], ji[40], pal[24], save[100];
 } opt = { -1, 0 };
 
@@ -210,8 +210,9 @@ static void start_render(void)
 	status[0] = 0;
 	t_start = ticks();
 	build_lut();
-	/* the fill pays off for the Mandelbrot set only; a Julia set is half the work by its symmetry instead */
-	use_ms = fast && !V.julia;
+	/* The fill pays off for the Mandelbrot set, zoomed in, where whole regions are one colour and each pixel is dear.
+	   In an overview the pixels are cheap and the row loop wins; a Julia set is half the work by its symmetry. */
+	use_ms = fast && !V.julia && view_zoomed();
 	if (use_ms) {
 		memset(img, UNSET, (LONG)V.w * V.h);
 		preview_pending = TRUE;
@@ -283,10 +284,8 @@ static void row_step(void)
 		render_done();
 		return;
 	}
-	view_row(y, rowbuf);
 	dst = img + (LONG)y * w;
-	for (x = 0; x < w; x++)
-		dst[x] = lut[rowbuf[x]];
+	view_row(y, dst, lut);
 	for (r = 1; r < rep; r++)
 		CopyMem(dst, dst + (LONG)r * w, w);
 	put_chunky(0, y, w, rep, dst);
@@ -315,7 +314,7 @@ static UBYTE pix(WORD x, WORD y)
 	UBYTE *p = img + (LONG)y * V.w + x;
 
 	if (*p == UNSET)
-		*p = lut[view_pixel(x, y)];
+		*p = view_pen(x, y, lut);
 	return *p;
 }
 
@@ -532,11 +531,8 @@ static LONG open_display(WORD m)
 	vi = GetVisualInfo(scr, TAG_END);
 	if (img)
 		FreeVec(img);
-	if (rowbuf)
-		FreeVec(rowbuf);
 	img = AllocVec((LONG)md->w * md->h, MEMF_PUBLIC | MEMF_CLEAR);
-	rowbuf = AllocVec(md->w, MEMF_PUBLIC);
-	if (!img || !rowbuf)
+	if (!img)
 		return 27;
 	ncol = 1 << cdepth;
 	mode = m;
@@ -968,8 +964,8 @@ static void setopt(char *dst, const char *src, WORD n)
 
 static void cli_opts(void)
 {
-	LONG a[12] = { 0 };
-	struct RDArgs *rda = ReadArgs("MODE/K/N,CX/K,CY/K,SPAN/K,ITER/K/N,PALETTE/K,JULIA/S,JR/K,JI/K,SAVE/K,QUIT/S,EXACT/S", a, NULL);
+	LONG a[13] = { 0 };
+	struct RDArgs *rda = ReadArgs("MODE/K/N,CX/K,CY/K,SPAN/K,ITER/K/N,PALETTE/K,JULIA/S,JR/K,JI/K,SAVE/K,QUIT/S,EXACT/S,DEPTH/K/N", a, NULL);
 
 	if (!rda) {
 		PrintFault(IoErr(), "amigamand");
@@ -989,6 +985,8 @@ static void cli_opts(void)
 	setopt(opt.save, (char *)a[9], sizeof opt.save);
 	opt.quit = a[10] != 0;
 	opt.exact = a[11] != 0;
+	if (a[12])
+		opt.depth = *(LONG *)a[12];
 	FreeArgs(rda);
 }
 
@@ -1021,6 +1019,8 @@ static void wb_opts(struct WBStartup *wbs)
 	opt.julia = FindToolType((UBYTE **)tt, "JULIA") != NULL;
 	opt.quit = FindToolType((UBYTE **)tt, "QUIT") != NULL;
 	opt.exact = FindToolType((UBYTE **)tt, "EXACT") != NULL;
+	if ((v = (char *)FindToolType((UBYTE **)tt, "DEPTH")))
+		opt.depth = to_long(v);
 	FreeDiskObject(dob);
 }
 
@@ -1083,6 +1083,9 @@ int main(int argc, char **argv)
 					pal_idx = i;
 	}
 	SetChipRev(SETCHIPREV_BEST); /* enable AGA modes if the machine has them */
+	if (opt.depth >= 1 && opt.depth <= 8) /* fewer bitplanes: less video DMA, fewer colours */
+		for (i = 0; i < NPRESET; i++)
+			modes[i].depth = opt.depth;
 	if (opt.exact)
 		fast = FALSE;
 	rexx_open();
@@ -1116,8 +1119,6 @@ out:
 	close_display();
 	if (img)
 		FreeVec(img);
-	if (rowbuf)
-		FreeVec(rowbuf);
 	if (IconBase)
 		CloseLibrary(IconBase);
 	if (AslBase)
